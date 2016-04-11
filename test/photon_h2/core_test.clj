@@ -10,7 +10,7 @@
 (let [start (System/currentTimeMillis)
       n 5000]
   (dorun (take n
-               (map #(db/store db {:photon-timestamp (System/currentTimeMillis)
+               (map #(db/store db {:event-time (System/currentTimeMillis)
                                    :order-id %
                                    :stream-name "hello" :payload {:hello (* 2 %)}})
                     (range))))
