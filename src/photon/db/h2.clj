@@ -1,8 +1,7 @@
 (ns photon.db.h2
   (:require [korma.db :refer :all]
             [korma.core :refer :all]
-            [photon.db :as db]
-            [com.stuartsierra.component :as component]))
+            [photon.db :as db]))
 
 (defn global-inits! [driver]
   (declare events)
@@ -34,47 +33,46 @@
         s (.replaceAll s "-" "")]
     (keyword (clojure.string/upper-case s))))
 
+(def h2-instances (ref {}))
+
+(defmacro wrap-driver [dbh2 body]
+  `(with-db
+     (if-let [driver# (get @h2-instances ~dbh2)]
+       driver#
+       (let [driver# (h2 {:db (:h2.path (:conf ~dbh2)) :make-pool? true})]
+         (global-inits! driver#)
+         (dosync (alter h2-instances assoc ~dbh2 driver#))
+         driver#))
+     ~body))
+
 (defrecord DBH2 [conf]
-  component/Lifecycle
-  (start [component]
-    (if (nil? (:driver component))
-      (let [driver (h2 {:db (:h2.path conf)
-                        :make-pool? true})]
-        (global-inits! driver)
-        (assoc component :driver driver))
-      component))
-  (stop [component]
-    (if (nil? (:driver component))
-      component
-      (do
-        (assoc component :driver nil))))
   db/DB
   (db/driver-name [this] "h2")
   (db/fetch [this stream-name id]
-    (with-db (:driver this)
+    (wrap-driver this
       (select events (where {:STREAMNAME stream-name :ORDERID id}))))
   (db/delete! [this id]
-    (with-db (:driver this) (delete events (where {:ORDERID id}))))
+    (wrap-driver this (delete events (where {:ORDERID id}))))
   (db/delete-all! [this]
-    (with-db (:driver this) (delete events)))
+    (wrap-driver this (delete events)))
   (db/put [this data] (db/store this data))
   (db/search [this id]
-    (with-db (:driver this (select events (where {:ORDERID id})))))
+    (wrap-driver this (select events (where {:ORDERID id}))))
   (db/store [this payload]
-    (with-db (:driver this)
+    (wrap-driver this
       (insert events (values {:ORDERID (:order-id payload)
                               :STREAMNAME (:stream-name payload)
                               :DATA (pr-str payload)}))))
   (db/distinct-values [this k]
     (into #{}
           (map #(get % (k->k k))
-               (with-db (:driver this)
+               (wrap-driver this
                  (select streams (modifier "DISTINCT"))))))
   (db/lazy-events [this stream-name date]
     (db/lazy-events-page this stream-name date 0))
   (db/lazy-events-page [this stream-name date page]
     (let [oid (if (nil? date) 0 (* 1000 date))
-          statement (with-db (:driver this)
+          statement (wrap-driver this
                       (if (or (= :__all__ stream-name)
                               (= "__all__" stream-name))
                         (select events (where {:ORDERID [>= oid]})

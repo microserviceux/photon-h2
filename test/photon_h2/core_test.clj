@@ -2,10 +2,9 @@
   (:require [clojure.test :refer :all]
             [photon.db.h2 :refer :all]
             [photon.db :as db]
-            [com.stuartsierra.component :as component]
             [midje.sweet :refer :all]))
 
-(def db (component/start (->DBH2 {:h2.path "/tmp/photon.h2"})))
+(def db (->DBH2 {:h2.path "/tmp/photon.h2"}))
 
 (db/delete-all! db)
 (let [start (System/currentTimeMillis)
@@ -21,4 +20,3 @@
 (fact "5000 events in"
       (count (db/lazy-events db "__all__" nil)) => 5000)
 
-(component/stop db)
