@@ -11,9 +11,6 @@
     (pk :ORDERID)
     (table :EVENTS)
     (entity-fields :STREAMNAME :DATA))
-  (defentity streams
-    (table :EVENTS)
-    (entity-fields :STREAMNAME))
   (with-db driver
     (exec-raw [(str "SET LOG 0;")])
     (exec-raw [(str "SET DB_CLOSE_DELAY 10;")])
@@ -48,11 +45,30 @@
      ~body))
 
 ;; TODO: Implement data encryption
-(defn decrypt [data]
-  (nippy/thaw data))
+(defn decrypt [data] (if (nil? data) nil (nippy/thaw data)))
 
-(defn encrypt [data]
-  (nippy/freeze data))
+(defn encrypt [data] (nippy/freeze data))
+
+(defn lazy-events-page [this stream-name date page]
+  (let [oid (if (nil? date) 0 (* 1000 date))
+        statement
+        (wrap-driver
+         this
+         (if (or (= :__all__ stream-name)
+                 (= "__all__" stream-name))
+           (select events (where {:ORDERID [>= oid]})
+                   (limit page-size) (offset page))
+           (if (.contains stream-name "**")
+             (select events
+                     (where {:ORDERID [>= oid]
+                             :STREAMNAME [like (clojure.string/replace
+                                                stream-name #"\*\*" "%")]})
+                     (limit page-size) (offset page))
+             (select events (where {:ORDERID [>= oid]
+                                    :STREAMNAME stream-name})
+                     (limit page-size) (offset page)))))]
+    (when-let [r (seq statement)]
+      (lazy-cat r (lazy-events-page this stream-name date (+ page page-size))))))
 
 (defrecord DBH2 [conf]
   db/DB
@@ -71,7 +87,6 @@
     (wrap-driver this (delete events (where {:ORDERID id}))))
   (db/delete-all! [this]
     (wrap-driver this (delete events)))
-  (db/put [this data] (db/store this data))
   (db/search [this id]
     (map (comp decrypt :DATA)
          (wrap-driver this (select events (where {:ORDERID id})))))
@@ -81,26 +96,11 @@
                                          :STREAMNAME (:stream-name payload)
                                          :DATA (encrypt payload)}))))
   (db/distinct-values [this k]
-    (into #{}
-          (map #(get % (k->k k))
-               (wrap-driver this
-                            (select streams (modifier "DISTINCT"))))))
+    (let [kk (k->k k)
+          db-res (wrap-driver this
+                              (select events (fields kk) (modifier "DISTINCT")))
+          values (into #{} (map kk db-res))]
+      values))
   (db/lazy-events [this stream-name date]
     (map (comp decrypt :DATA)
-         (db/lazy-events-page this stream-name date 0)))
-  (db/lazy-events-page [this stream-name date page]
-    (let [oid (if (nil? date) 0 (* 1000 date))
-          statement
-          (wrap-driver
-           this
-           (if (or (= :__all__ stream-name)
-                   (= "__all__" stream-name))
-             (select events (where {:ORDERID [>= oid]})
-                     (limit page-size) (offset page))
-             (select events (where {:ORDERID [>= oid]
-                                    :STREAMNAME stream-name})
-                     (limit page-size) (offset page))))]
-      (when-let [r (seq statement)]
-        (lazy-cat r
-                  (db/lazy-events-page this stream-name date
-                                       (+ page page-size)))))))
+         (lazy-events-page this stream-name date 0))))
