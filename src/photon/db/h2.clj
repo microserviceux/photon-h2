@@ -49,9 +49,8 @@
 
 (defn encrypt [data] (nippy/freeze data))
 
-(defn lazy-events-page [this stream-name date page]
-  (let [oid (if (nil? date) 0 (* 1000 date))
-        statement
+(defn lazy-events-page [this stream-name oid page]
+  (let [statement
         (wrap-driver
          this
          (if (or (= :__all__ stream-name)
@@ -68,7 +67,7 @@
                                     :STREAMNAME stream-name})
                      (limit page-size) (offset page)))))]
     (when-let [r (seq statement)]
-      (lazy-cat r (lazy-events-page this stream-name date (+ page page-size))))))
+      (lazy-cat r (lazy-events-page this stream-name oid (+ page page-size))))))
 
 (defrecord DBH2 [conf]
   db/DB
@@ -83,8 +82,9 @@
                                   :STREAMNAME stream-name})
                    (limit 1))))
         first :DATA decrypt))
-  (db/delete! [this id]
-    (wrap-driver this (delete events (where {:ORDERID id}))))
+  (db/delete! [this stream-name order-id]
+    (wrap-driver this (delete events (where {:ORDERID [= order-id]
+                                             :STREAMNAME stream-name}))))
   (db/delete-all! [this]
     (wrap-driver this (delete events)))
   (db/search [this id]
@@ -102,5 +102,6 @@
           values (into #{} (map kk db-res))]
       values))
   (db/lazy-events [this stream-name date]
-    (map (comp decrypt :DATA)
-         (lazy-events-page this stream-name date 0))))
+    (let [oid (if (nil? date) 0 (if (string? date) (read-string date) date))]
+      (map (comp decrypt :DATA)
+           (lazy-events-page this stream-name oid 0)))))
