@@ -10,7 +10,7 @@
   (defentity events
     (pk :ORDERID)
     (table :EVENTS)
-    (entity-fields :STREAMNAME :DATA))
+    (entity-fields :ORDERID :STREAMNAME :DATA))
   (with-db driver
     (exec-raw [(str "SET LOG 0;")])
     (exec-raw [(str "SET DB_CLOSE_DELAY 10;")])
@@ -55,19 +55,20 @@
          this
          (if (or (= :__all__ stream-name)
                  (= "__all__" stream-name))
-           (select events (where {:ORDERID [>= oid]})
-                   (limit page-size) (offset page))
+           (select events (where {:ORDERID [>= oid]}) (limit page-size))
            (if (.contains stream-name "**")
              (select events
                      (where {:ORDERID [>= oid]
                              :STREAMNAME [like (clojure.string/replace
                                                 stream-name #"\*\*" "%")]})
-                     (limit page-size) (offset page))
+                     (limit page-size))
              (select events (where {:ORDERID [>= oid]
                                     :STREAMNAME stream-name})
-                     (limit page-size) (offset page)))))]
+                     (limit page-size)))))]
     (when-let [r (seq statement)]
-      (lazy-cat r (lazy-events-page this stream-name oid (+ page page-size))))))
+      (concat r (lazy-seq
+                 (lazy-events-page this stream-name (inc (:ORDERID (last r)))
+                                   (+ page page-size)))))))
 
 (defrecord DBH2 [conf]
   db/DB
